@@ -1,0 +1,6 @@
+rules:
+  - id: lab10-python-eval
+    languages: [python]
+    severity: ERROR
+    message: "Avoid eval() on untrusted input (intentional lab demonstration)."
+    pattern: eval(...)
