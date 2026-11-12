@@ -27,17 +27,31 @@ def api(method, path, token=None, value=None):
         return json.loads(body) if body else {}
 
 def ready():
-    for _ in range(40):
+    for attempt in range(60):
+        # If Docker exited, do not keep waiting for an unreachable port.
+        state = subprocess.run(
+            ['docker', 'inspect', '-f', '{{.State.Running}}', NAME],
+            capture_output=True, text=True, check=False)
+        if state.returncode == 0 and state.stdout.strip() == 'false':
+            status = subprocess.run(
+                ['docker', 'inspect', '-f', '{{.State.Status}} (exit={{.State.ExitCode}})', NAME],
+                capture_output=True, text=True, check=False)
+            raise RuntimeError('Vault Docker container stopped: ' + status.stdout.strip())
         try:
             api('GET', 'sys/health')
             return
-        except (URLError, HTTPError, TimeoutError):
+        except (HTTPError, URLError, OSError, TimeoutError, ValueError):
+            # ConnectionResetError is an OSError and can occur during startup.
+            if attempt in (0, 10, 20, 40):
+                print(f'Vault readiness check: waiting for dev server ({attempt + 1}/60)')
             time.sleep(1)
-    raise RuntimeError('Vault dev server did not become ready')
+    raise RuntimeError('Vault dev server did not become ready within 60 seconds')
 
 def main():
     root_token = secrets.token_urlsafe(32)
-    cmd = ['docker','run','-d','--rm','--name',NAME,
+    # Remove any leftover demo container from a previous interrupted run.
+    subprocess.run(['docker', 'rm', '-f', NAME], check=False, capture_output=True)
+    cmd = ['docker','run','-d','--name',NAME,
            '--cap-add=IPC_LOCK','-p','127.0.0.1:8200:8200',
            '-e','VAULT_DEV_ROOT_TOKEN_ID='+root_token,
            '-e','VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200',
@@ -77,7 +91,7 @@ def main():
         print('PASS: Vault stored a random demo secret; scoped token READ allowed, WRITE 403.')
         print('PASS: app read Vault KV v2 via token; no secret values were logged.')
     finally:
-        subprocess.run(['docker','stop',NAME], check=False, capture_output=True)
+        subprocess.run(['docker','rm','-f',NAME], check=False, capture_output=True)
 
 if __name__ == '__main__':
     main()
