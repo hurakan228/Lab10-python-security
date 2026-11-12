@@ -1,4 +1,4 @@
-# Sensitive files must never be pushed
+# Do not upload private secrets
 .env
 .env.*
 !.env.example
@@ -8,6 +8,8 @@ age-key.txt
 secrets/temporary.env
 secrets/*.plain.*
 secrets/*.dec.*
+
+# Python
 __pycache__/
 *.py[cod]
 .pytest_cache/
