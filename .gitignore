@@ -1,0 +1,16 @@
+# Sensitive files must never be pushed
+.env
+.env.*
+!.env.example
+*.key
+key.txt
+age-key.txt
+secrets/temporary.env
+secrets/*.plain.*
+secrets/*.dec.*
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+reports/
+dist/
