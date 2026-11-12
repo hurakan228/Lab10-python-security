@@ -1,0 +1,152 @@
+name: 'Lab 10 - Python CI, SAST, SCA and Secrets'
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: 'Build and unit tests'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 'Install app dependencies'
+        run: python -m pip install -r requirements.txt
+      - name: 'Test and package app'
+        run: |
+          python -m unittest discover -s tests -v
+          python scripts/build.py
+      - name: 'Upload application package'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab10-built-app
+          path: dist/lab10-demo-app.zip
+          if-no-files-found: error
+
+  semgrep:
+    name: 'SAST 1 - Semgrep p/python'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 'Install Semgrep in isolation'
+        run: |
+          python -m pip install --user pipx
+          python -m pipx install semgrep
+      - name: 'Scan with p/python and lab check rule'
+        run: |
+          mkdir -p reports
+          "$HOME/.local/bin/semgrep" scan --config p/python --config .semgrep.yml --json --output reports/semgrep.json app.py config.py scripts examples tests
+          python scripts/validate_scans.py semgrep reports/semgrep.json
+      - name: 'Semgrep findings summary'
+        if: always()
+        run: python scripts/summary.py semgrep
+      - name: 'Upload Semgrep report'
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab10-semgrep-report
+          path: reports/semgrep.json
+          if-no-files-found: warn
+
+  codeql:
+    name: 'SAST 2 - CodeQL Python'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: 'Initialize CodeQL'
+        uses: github/codeql-action/init@v4
+        with:
+          languages: python
+          queries: security-extended
+      - name: 'Compile Python sources'
+        run: python -m compileall -q app.py config.py scripts tests
+      - name: 'Analyze and upload code scanning results'
+        uses: github/codeql-action/analyze@v4
+        with:
+          output: codeql-results
+      - name: 'Upload CodeQL SARIF report'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab10-codeql-report
+          path: codeql-results/
+          if-no-files-found: error
+
+  trivy:
+    name: 'SCA + secret scan - Trivy'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 'Prepare report folder'
+        run: mkdir -p reports
+      - name: 'Scan filesystem, dependencies and exposed secrets'
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret
+          format: json
+          output: reports/trivy.json
+          exit-code: '0'
+      - name: 'Validate scan output (findings do not fail job)'
+        run: python scripts/validate_scans.py trivy reports/trivy.json
+      - name: 'Trivy findings summary'
+        if: always()
+        run: python scripts/summary.py trivy
+      - name: 'Upload Trivy report'
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab10-trivy-report
+          path: reports/trivy.json
+          if-no-files-found: warn
+
+  secrets-demo:
+    name: 'SOPS + age and Vault read-only token'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 'Install application requirements'
+        run: python -m pip install -r requirements.txt
+      - name: 'SOPS decrypt encrypted repo secret'
+        if: github.event_name != 'pull_request'
+        env:
+          SOPS_AGE_KEY: ${{ secrets.LAB10_AGE_PRIVATE_KEY }}
+        run: |
+          if [ ! -f secrets/secrets.enc.env ]; then
+            echo 'SOPS: NOT CONFIGURED. Run scripts/setup-sops.ps1 and commit the encrypted dotenv file.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ -z "$SOPS_AGE_KEY" ]; then
+            echo 'SOPS: FAILED, configure LAB10_AGE_PRIVATE_KEY in repository secrets.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          SOPS_VER=v3.10.2
+          curl -fsSL "https://github.com/getsops/sops/releases/download/${SOPS_VER}/sops-${SOPS_VER}.linux.amd64" -o /tmp/sops
+          chmod +x /tmp/sops
+          /tmp/sops decrypt --input-type dotenv --output-type dotenv secrets/secrets.enc.env | python scripts/check_sops.py
+          echo 'SOPS: PASS. Encrypted file decrypted with private age key stored outside repository.' >> "$GITHUB_STEP_SUMMARY"
+      - name: 'Vault dev KV v2 demo with restricted token'
+        run: |
+          python scripts/vault_demo.py
+          echo 'Vault: PASS. Read-only token was accepted for READ; WRITE returned HTTP 403.' >> "$GITHUB_STEP_SUMMARY"
+      - name: 'Confirm secret gate'
+        run: echo 'Secret checks reached the end without an error.' >> "$GITHUB_STEP_SUMMARY"
