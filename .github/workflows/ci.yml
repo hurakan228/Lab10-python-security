@@ -142,7 +142,7 @@ jobs:
           SOPS_VER=v3.10.2
           curl -fsSL "https://github.com/getsops/sops/releases/download/${SOPS_VER}/sops-${SOPS_VER}.linux.amd64" -o /tmp/sops
           chmod +x /tmp/sops
-          /tmp/sops decrypt --input-type dotenv --output-type dotenv secrets/secrets.enc.env | python scripts/check_sops.py
+          /tmp/sops decrypt --input-type dotenv --output-type dotenv secrets/secrets.enc.env | python -m scripts.check_sops
           echo 'SOPS: PASS. Encrypted file decrypted with private age key stored outside repository.' >> "$GITHUB_STEP_SUMMARY"
       - name: 'Vault dev KV v2 demo with restricted token'
         run: |
