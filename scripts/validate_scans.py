@@ -26,7 +26,7 @@ def main():
             raise SystemExit("FAIL: Trivy Results list missing; scanner possibly failed")
         vulnerabilities = sum(len(x.get("Vulnerabilities") or []) for x in data["Results"])
         secrets = sum(len(x.get("Secrets") or []) for x in data["Results"])
-        print(f"Trivy PASS: {vulnerabilities} vulnerability findings; {secrets} secret findings")
+        print("Trivy scan completed successfully.")
     else:
         raise SystemExit("Unknown scanner")
 
