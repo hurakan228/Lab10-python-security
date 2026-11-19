@@ -1,4 +1,4 @@
-# Do not upload private secrets
+# Original Lab 10 ignores (preserved)
 .env
 .env.*
 !.env.example
@@ -8,11 +8,13 @@ age-key.txt
 secrets/temporary.env
 secrets/*.plain.*
 secrets/*.dec.*
-
-# Python
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
 reports/
 dist/
+# Lab 11 runtime / evidence
+lab11-runtime-check.txt
+lab11-image-trivy.json
+deploy/nginx/certs/

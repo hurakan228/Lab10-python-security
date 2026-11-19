@@ -1,0 +1,106 @@
+name: 'Lab 11 - Hardened Container and Local HTTPS Deployment'
+
+on:
+  push:
+    branches: [main, lab11]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  semgrep:
+    name: SAST - Semgrep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Analyze source with Semgrep
+        run: |
+          python -m pip install --user pipx
+          python -m pipx run --spec semgrep semgrep scan --config p/python --config .semgrep.yml --json --output lab11-semgrep.json app.py config.py scripts tests
+      - name: Upload Semgrep JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab11-semgrep-report
+          path: lab11-semgrep.json
+          if-no-files-found: warn
+
+  codeql:
+    name: SAST - CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: python
+          queries: security-extended
+      - name: Analyze Python sources
+        run: python -m compileall -q app.py config.py scripts tests
+      - uses: github/codeql-action/analyze@v4
+        with:
+          output: lab11-codeql-results
+      - name: Upload CodeQL SARIF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab11-codeql-report
+          path: lab11-codeql-results/
+          if-no-files-found: warn
+
+  build-deploy-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install and test existing Flask app
+        run: |
+          python -m pip install -r requirements.txt
+          python -m unittest discover -s tests -v
+          python -m compileall -q app.py config.py scripts tests
+      - name: Validate Docker Compose configuration
+        run: docker compose config -q
+      - name: Create short-lived LOCAL test TLS cert inside Docker volume
+        run: bash scripts/lab11_create_tls.sh
+      - name: Build hardened application image
+        run: docker compose build --pull
+      - name: Start backend and HTTPS reverse proxy
+        run: docker compose up -d --wait
+      - name: Check real HTTPS responses and container restrictions
+        run: python scripts/lab11_verify.py | tee lab11-runtime-check.txt
+      - name: Scan final Docker image with Trivy (report only)
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: image
+          image-ref: lab11-hardened-app:local
+          scanners: vuln,secret
+          severity: CRITICAL,HIGH
+          format: json
+          output: lab11-image-trivy.json
+          exit-code: '0'
+      - name: Upload Lab 11 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab11-hardening-evidence
+          path: |
+            lab11-runtime-check.txt
+            lab11-image-trivy.json
+          if-no-files-found: warn
+      - name: Container logs (no secret values expected)
+        if: failure()
+        run: docker compose logs --tail=80
+      - name: Clean up demonstration containers
+        if: always()
+        run: docker compose down --remove-orphans
