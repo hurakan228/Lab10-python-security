@@ -80,7 +80,7 @@ jobs:
       - name: Check real HTTPS responses and container restrictions
         run: python scripts/lab11_verify.py | tee lab11-runtime-check.txt
       - name: Scan final Docker image with Trivy (report only)
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
           image-ref: lab11-hardened-app:local
